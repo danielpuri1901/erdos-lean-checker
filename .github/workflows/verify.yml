@@ -1,7 +1,4 @@
-# Adapted from nick-kuhn/erdos-619 (.github/workflows/verify.yml).
-# Not yet green: Lean, Comparator, and lean4export versions must agree (design doc, build step 3).
 name: verify
-
 on:
   workflow_dispatch:
     inputs:
@@ -9,90 +6,108 @@ on:
         description: Commit of erdos-lean-formalization to verify
         required: true
       target:
-        description: Target id (matches a file in comparator/)
+        description: Target id (file stem in challenge/ and comparator/)
         required: true
-  push:
-    branches: [main]
-
 permissions:
   contents: read
-
 jobs:
   verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
+    env:
+      TARGET: ${{ inputs.target }}
+      AGENT_COMMIT: ${{ inputs.agent_commit }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
+        with:
+          persist-credentials: false
       - name: Check out the agent repository at the commit under test
-        if: github.event_name == 'workflow_dispatch'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           repository: danielpuri1901/erdos-lean-formalization
           ref: ${{ inputs.agent_commit }}
           path: agent
-          token: ${{ secrets.AGENT_REPO_READ_TOKEN }}
-
+          token: ${{ secrets.AGENT_REPO_TOKEN }}
+          # The token can write commit statuses; never leave it where agent code can read it.
+          persist-credentials: false
+      - name: Report pending status
+        run: |
+          gh api -X POST "repos/danielpuri1901/erdos-lean-formalization/statuses/$AGENT_COMMIT" \
+            -f state=pending -f context="comparator/$TARGET" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_REPO_TOKEN }}
+      - name: Freeze the challenge and the build configuration
+        # Comparator trusts the lakefile and every prebuilt olean, so the agent's copies are replaced or removed.
+        run: |
+          cp "challenge/$TARGET.lean" agent/Challenge.lean
+          cp "scripts/axioms/$TARGET.lean" agent/AxiomCheck.lean
+          cp frozen/lakefile.toml frozen/lake-manifest.json frozen/lean-toolchain agent/
+          rm -rf agent/lakefile.lean agent/.lake agent/.claude agent/scripts/hooks
       - name: Install elan
         run: |
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
             | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-
-      - name: Get Mathlib cache
-        if: github.event_name == 'workflow_dispatch'
+      - name: Fetch dependencies and Mathlib cache
         working-directory: agent
         run: lake exe cache get
-
-      - name: Build challenge and solution
-        if: github.event_name == 'workflow_dispatch'
+      - name: Build the frozen challenge
+        # Only trusted code is built outside the sandbox. Comparator builds Solution under landrun.
         working-directory: agent
-        run: lake build Challenge Solution
-
-      - name: Axiom audit
-        if: github.event_name == 'workflow_dispatch'
-        working-directory: agent
-        run: lake env lean ../scripts/AxiomCheck.lean
-
-      - name: Clone Comparator (pinned commit)
+        run: lake build Challenge
+      - name: Clone Comparator (pinned) and match the agent's Lean version
         run: |
           git clone https://github.com/leanprover/comparator .tools/comparator
-          git -C .tools/comparator checkout 7a0cae3df7a0200ff330c82420b8d88a51c9cac7
-
+          git -C .tools/comparator checkout 3927ad383f208ae977c340a91c48ac9b497d2097
+          cp frozen/lean-toolchain .tools/comparator/lean-toolchain
       - name: Restore Comparator build cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .tools/comparator/.lake
-          key: comparator-7a0cae3-${{ runner.os }}
-
+          key: comparator-3927ad3-${{ hashFiles('frozen/lean-toolchain') }}-${{ runner.os }}
       - name: Build Comparator and lean4export
         working-directory: .tools/comparator
         run: lake build lean4export comparator
-
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: 'stable'
-
-      - name: Build landrun (pinned commit)
+      - name: Build landrun (pinned)
         run: GOBIN="$RUNNER_TEMP/landrun-bin" go install github.com/zouuup/landrun/cmd/landrun@5ed4a3db3a4a
-
       - name: Landrun smoke test
         run: |
           "$RUNNER_TEMP/landrun-bin/landrun" --best-effort --ro / --rw /dev \
             -ldd -add-exec /usr/bin/echo hello
-
+      - name: Close the Docker socket
+        # landrun does not filter AF_UNIX connections (Comparator README), and the runner user can reach Docker.
+        run: sudo systemctl stop docker.socket docker.service
       - name: Run Comparator
-        if: github.event_name == 'workflow_dispatch'
+        id: comparator
         run: |
-          COMPARATOR_BIN=.tools/comparator/.lake/build/bin/comparator \
-          COMPARATOR_LEAN4EXPORT=.tools/comparator/.lake/packages/lean4export/.lake/build/bin/lean4export \
+          AGENT_DIR="$PWD/agent" \
+          COMPARATOR_BIN="$PWD/.tools/comparator/.lake/build/bin/comparator" \
+          COMPARATOR_LEAN4EXPORT="$PWD/.tools/comparator/.lake/packages/lean4export/.lake/build/bin/lean4export" \
           COMPARATOR_LANDRUN="$RUNNER_TEMP/landrun-bin/landrun" \
-          ./scripts/check.sh "comparator/${{ inputs.target }}.json" | tee comparator.log
+          bash scripts/check.sh "comparator/$TARGET.json" | tee comparator.log
           grep -q "Your solution is okay!" comparator.log
-
+      - name: Report final status
+        if: always()
+        run: |
+          STATE=failure; [ "${{ steps.comparator.outcome }}" = "success" ] && STATE=success
+          gh api -X POST "repos/danielpuri1901/erdos-lean-formalization/statuses/$AGENT_COMMIT" \
+            -f state=$STATE -f context="comparator/$TARGET" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_REPO_TOKEN }}
+      - name: Axiom audit (documentation, after the verdict)
+        # Imports the Solution olean outside the sandbox, so it runs only after the status is written.
+        if: steps.comparator.outcome == 'success'
+        working-directory: agent
+        run: lake env lean AxiomCheck.lean | tee ../axioms.log
       - name: Upload Comparator log
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: comparator-log
-          path: comparator.log
-        if: always() && github.event_name == 'workflow_dispatch'
+          name: comparator-log-${{ inputs.target }}
+          path: |
+            comparator.log
+            axioms.log
+          if-no-files-found: ignore
