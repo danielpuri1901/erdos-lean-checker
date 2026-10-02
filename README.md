@@ -44,3 +44,17 @@ When the agent project needs a new library or dependency, Daniel updates `frozen
 - `scripts/check.sh`: runs Comparator on the agent checkout.
 - `scripts/axioms/<target>.lean`: axiom audit per target.
 - `tests/bad/<case>.lean`: negative fixtures.
+
+## Negative tests
+
+Run https://github.com/danielpuri1901/erdos-lean-checker/actions/runs/37029994928 (2026-10-02): `verify` green, and Comparator rejected every bad solution for its own reason.
+
+| fixture | Comparator's reason |
+|---------|---------------------|
+| `sorry` | `Illegal axiom detected: 'sorryAx'` |
+| `axiom` | `Illegal axiom detected: 'cheat'` |
+| `native_decide` | `Illegal axiom detected: 'helper._native.native_decide.ax_1_1'` |
+| `wrong_statement` | `Challenge and solution theorem statement do not match: 'challenge_trivial'` |
+| `redefine` | `Const does not match between challenge and target 'Green72.AllowedSetSize'` |
+
+The `redefine` fixture shadows the definitions without importing formal-conjectures, so it compiles and only Comparator's definition check can catch it.
