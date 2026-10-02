@@ -111,3 +111,71 @@ jobs:
             comparator.log
             axioms.log
           if-no-files-found: ignore
+  negative:
+    if: inputs.target == 'trivial'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        bad: [sorry, axiom, native_decide, wrong_statement, redefine]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: danielpuri1901/erdos-lean-formalization
+          ref: ${{ inputs.agent_commit }}
+          path: agent
+          token: ${{ secrets.AGENT_REPO_TOKEN }}
+          persist-credentials: false
+      - name: Freeze challenge and build configuration, plant the bad solution
+        run: |
+          cp challenge/trivial.lean agent/Challenge.lean
+          cp frozen/lakefile.toml frozen/lake-manifest.json frozen/lean-toolchain agent/
+          rm -rf agent/lakefile.lean agent/.lake
+          cp "tests/bad/${{ matrix.bad }}.lean" agent/Solution.lean
+      - name: Install elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Fetch dependencies and Mathlib cache
+        working-directory: agent
+        run: lake exe cache get
+      - name: Build the frozen challenge
+        working-directory: agent
+        run: lake build Challenge
+      - name: Clone Comparator (pinned) and match the agent's Lean version
+        run: |
+          git clone https://github.com/leanprover/comparator .tools/comparator
+          git -C .tools/comparator checkout 3927ad383f208ae977c340a91c48ac9b497d2097
+          cp frozen/lean-toolchain .tools/comparator/lean-toolchain
+      - name: Restore Comparator build cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .tools/comparator/.lake
+          key: comparator-3927ad3-${{ hashFiles('frozen/lean-toolchain') }}-${{ runner.os }}
+      - name: Build Comparator and lean4export
+        working-directory: .tools/comparator
+        run: lake build lean4export comparator
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: 'stable'
+      - name: Build landrun (pinned)
+        run: GOBIN="$RUNNER_TEMP/landrun-bin" go install github.com/zouuup/landrun/cmd/landrun@5ed4a3db3a4a
+      - name: Close the Docker socket
+        run: sudo systemctl stop docker.socket docker.service
+      - name: Comparator must reject
+        run: |
+          set +e
+          AGENT_DIR="$PWD/agent" \
+          COMPARATOR_BIN="$PWD/.tools/comparator/.lake/build/bin/comparator" \
+          COMPARATOR_LEAN4EXPORT="$PWD/.tools/comparator/.lake/packages/lean4export/.lake/build/bin/lean4export" \
+          COMPARATOR_LANDRUN="$RUNNER_TEMP/landrun-bin/landrun" \
+          bash scripts/check.sh comparator/trivial.json 2>&1 | tee comparator.log
+          if grep -q "Your solution is okay!" comparator.log; then
+            echo "FAIL: bad solution ${{ matrix.bad }} was accepted"; exit 1
+          fi
+          echo "rejected as expected"
