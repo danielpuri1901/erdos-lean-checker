@@ -31,7 +31,10 @@ So the workflow:
 - builds only `Challenge` outside the sandbox, and lets Comparator build `Solution` under landrun;
 - checks out the agent repository without persisting the token, because the token can write commit statuses;
 - stops Docker before Comparator runs, because landrun does not filter Unix sockets;
-- runs the `#print axioms` audit only after the commit status is written, because it imports the solution outside the sandbox.
+- runs the `#print axioms` audit only after the commit status is written, because it imports the solution outside the sandbox;
+- takes the verdict from Comparator's exit code and its exact last line, never from a search of the log, because the log also holds the solution's own build output (see `tests/bad/print_ok.lean`).
+
+On failure, the commit status description is Comparator's last line, cut to 140 characters.
 
 When the agent project needs a new library or dependency, Daniel updates `frozen/` by hand.
 
@@ -42,6 +45,8 @@ When the agent project needs a new library or dependency, Daniel updates `frozen
 - `comparator/<target>.json`: Comparator configuration per target.
 - `frozen/`: the build configuration the agent project is checked with.
 - `scripts/check.sh`: runs Comparator on the agent checkout.
+- `scripts/pending_submits.py`: finds `submit(` commits without a verdict.
+- `.github/workflows/check-submits.yml`: the 15-minute poller.
 - `scripts/axioms/<target>.lean`: axiom audit per target.
 - `tests/bad/<case>.lean`: negative fixtures.
 
@@ -56,5 +61,21 @@ Run https://github.com/danielpuri1901/erdos-lean-checker/actions/runs/3702999492
 | `native_decide` | `Illegal axiom detected: 'helper._native.native_decide.ax_1_1'` |
 | `wrong_statement` | `Challenge and solution theorem statement do not match: 'challenge_trivial'` |
 | `redefine` | `Const does not match between challenge and target 'Green72.AllowedSetSize'` |
+| `print_ok` | `Challenge and solution theorem statement do not match: 'challenge_trivial'` |
 
 The `redefine` fixture shadows the definitions without importing formal-conjectures, so it compiles and only Comparator's definition check can catch it.
+
+`print_ok` prints `Your solution is okay!` during its own build and proves the wrong statement.
+Before 2026-10-03 the workflow searched the whole log for that line, so this solution got a green status (run https://github.com/danielpuri1901/erdos-lean-checker/actions/runs/37120516617).
+After the fix the same commit is rejected (run https://github.com/danielpuri1901/erdos-lean-checker/actions/runs/37121166249), and the negative job pins it.
+
+## Automatic checks
+
+`check-submits.yml` runs every 15 minutes and on demand.
+It lists the last 30 commits of the agent repository and runs `verify.yml` for each commit whose message starts with `submit(<target>):`, where `challenge/<target>.lean` exists, and that has no `comparator/<target>` status yet.
+A pending status counts, so a running check is never started twice.
+The selection logic is in `scripts/pending_submits.py`, tested by `tests/test_pending_submits.py`.
+Nothing in the agent repository can trigger it; the agent only pushes commits.
+
+Cost: on a private repository GitHub bills each job by the minute, rounded up, so the poller alone uses about 96 minutes a day.
+Disable it between runs with `gh workflow disable check-submits.yml -R danielpuri1901/erdos-lean-checker`.
