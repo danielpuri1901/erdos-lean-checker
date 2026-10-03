@@ -96,9 +96,18 @@ jobs:
         # Two submissions on 2026-10-03 (de3bff9, de563a7) built 4 heavy modules at once and the runner was shut down.
         # continue-on-error: a swap failure must never turn into a wrong verdict.
         continue-on-error: true
+        # The swap file shares the root disk with Mathlib, so it takes at most free space minus 8 GB:
+        # a fixed 24 GB file filled the disk on 2026-10-03 and the runner died ("No space left on device").
         run: |
-          sudo fallocate -l 24G /mnt/checker.swap && sudo chmod 600 /mnt/checker.swap
-          sudo mkswap /mnt/checker.swap >/dev/null && sudo swapon /mnt/checker.swap
+          df -h / /mnt | tee -a "$GITHUB_STEP_SUMMARY"
+          avail=$(df --output=avail -BG /mnt | tail -n 1 | tr -dc 0-9)
+          size=$(( avail - 8 > 16 ? 16 : avail - 8 ))
+          if [ "$size" -ge 4 ]; then
+            sudo fallocate -l "${size}G" /mnt/checker.swap && sudo chmod 600 /mnt/checker.swap
+            sudo mkswap /mnt/checker.swap >/dev/null && sudo swapon /mnt/checker.swap
+          else
+            echo "only ${avail} GB free: no extra swap" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
           free -h | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Run Comparator
         id: comparator
