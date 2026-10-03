@@ -74,6 +74,7 @@ After the fix the same commit is rejected (run https://github.com/danielpuri1901
 `check-submits.yml` runs every 15 minutes and on demand.
 It lists the last 30 commits of `main`, every `run/*` branch (one per measured run), and every `claude/*` branch (where cloud sessions push) of the agent repository and runs `verify.yml` for each commit whose message starts with `submit(<target>):`, where `challenge/<target>.lean` exists, and that has no `comparator/<target>` status yet.
 A pending status counts, so a running check is never started twice.
+If a check's runner dies (for example out of memory, as on 2026-10-03 for agent commit `de3bff9`), its final status step never runs; the next poller run turns that stale `pending` into a `failure` whose description says so, and the agent gets feedback.
 The selection logic is in `scripts/pending_submits.py`, tested by `tests/test_pending_submits.py`.
 Nothing in the agent repository can trigger it; the agent only pushes commits.
 

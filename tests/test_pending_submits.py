@@ -29,3 +29,13 @@ def test_watched_branches():
     # Cloud sessions push to their own claude/<name> branch.
     assert ps.watched(["main", "run/b1", "run/a2", "freeze-test", "feature", "claude/focused-faraday-2qp5e1"]) == \
         ["main", "run/b1", "run/a2", "claude/focused-faraday-2qp5e1"]
+
+def test_stale_pending_finds_pending_whose_run_finished():
+    statuses = {
+        "s1": [{"context": "comparator/green72", "state": "pending", "target_url": "https://github.com/o/r/actions/runs/11"}],
+        "s2": [{"context": "comparator/green72", "state": "pending", "target_url": "https://github.com/o/r/actions/runs/12"}],
+        "s3": [{"context": "comparator/green72", "state": "success", "target_url": "https://github.com/o/r/actions/runs/13"}],
+    }
+    finished = {"11": True, "12": False, "13": True}
+    assert ps.stale_pending(statuses, finished.get) == [
+        ("s1", "comparator/green72", "https://github.com/o/r/actions/runs/11")]

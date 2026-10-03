@@ -7,6 +7,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: check-submits
 jobs:
@@ -23,6 +24,7 @@ jobs:
         id: find
         env:
           GH_TOKEN: ${{ secrets.AGENT_REPO_TOKEN }}
+          CHECKER_TOKEN: ${{ github.token }}
         run: |
           m=$(python3 scripts/pending_submits.py)
           echo "$m" | tee -a "$GITHUB_STEP_SUMMARY"
