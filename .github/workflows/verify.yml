@@ -8,6 +8,18 @@ on:
       target:
         description: Target id (file stem in challenge/ and comparator/)
         required: true
+  # check-submits.yml calls this for every submit( commit without a verdict.
+  workflow_call:
+    inputs:
+      agent_commit:
+        type: string
+        required: true
+      target:
+        type: string
+        required: true
+    secrets:
+      AGENT_REPO_TOKEN:
+        required: true
 permissions:
   contents: read
 jobs:
@@ -82,19 +94,28 @@ jobs:
         run: sudo systemctl stop docker.socket docker.service
       - name: Run Comparator
         id: comparator
+        # The verdict is Comparator's exit code. The log also holds the solution's own build output,
+        # which can print any text, so a matching line anywhere in it proves nothing.
         run: |
+          set -o pipefail
           AGENT_DIR="$PWD/agent" \
           COMPARATOR_BIN="$PWD/.tools/comparator/.lake/build/bin/comparator" \
           COMPARATOR_LEAN4EXPORT="$PWD/.tools/comparator/.lake/packages/lean4export/.lake/build/bin/lean4export" \
           COMPARATOR_LANDRUN="$RUNNER_TEMP/landrun-bin/landrun" \
-          bash scripts/check.sh "comparator/$TARGET.json" | tee comparator.log
-          grep -q "Your solution is okay!" comparator.log
+          bash scripts/check.sh "comparator/$TARGET.json" 2>&1 | tee comparator.log
+          [ "$(tail -n 1 comparator.log)" = "Your solution is okay!" ]
       - name: Report final status
         if: always()
+        # On failure the description is Comparator's last line (GitHub keeps at most 140 characters).
         run: |
           STATE=failure; [ "${{ steps.comparator.outcome }}" = "success" ] && STATE=success
+          DESC="Your solution is okay!"
+          if [ "$STATE" = failure ]; then
+            DESC=$(grep -v '^[[:space:]]*$' comparator.log 2>/dev/null | tail -n 1 | cut -c1-140)
+            DESC=${DESC:-"no Comparator verdict: an earlier step failed"}
+          fi
           gh api -X POST "repos/danielpuri1901/erdos-lean-formalization/statuses/$AGENT_COMMIT" \
-            -f state=$STATE -f context="comparator/$TARGET" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            -f state=$STATE -f context="comparator/$TARGET" -f description="$DESC" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
         env:
           GH_TOKEN: ${{ secrets.AGENT_REPO_TOKEN }}
       - name: Axiom audit (documentation, after the verdict)
@@ -118,7 +139,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        bad: [sorry, axiom, native_decide, wrong_statement, redefine]
+        bad: [sorry, axiom, native_decide, wrong_statement, redefine, print_ok]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -168,6 +189,7 @@ jobs:
       - name: Close the Docker socket
         run: sudo systemctl stop docker.socket docker.service
       - name: Comparator must reject
+        # Same verdict rule as the verify job: Comparator's exit code and its exact last line.
         run: |
           set +e
           AGENT_DIR="$PWD/agent" \
@@ -175,7 +197,8 @@ jobs:
           COMPARATOR_LEAN4EXPORT="$PWD/.tools/comparator/.lake/packages/lean4export/.lake/build/bin/lean4export" \
           COMPARATOR_LANDRUN="$RUNNER_TEMP/landrun-bin/landrun" \
           bash scripts/check.sh comparator/trivial.json 2>&1 | tee comparator.log
-          if grep -q "Your solution is okay!" comparator.log; then
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -eq 0 ] && [ "$(tail -n 1 comparator.log)" = "Your solution is okay!" ]; then
             echo "FAIL: bad solution ${{ matrix.bad }} was accepted"; exit 1
           fi
-          echo "rejected as expected"
+          echo "rejected as expected (exit $rc): $(tail -n 1 comparator.log)"

@@ -1,0 +1,41 @@
+name: check-submits
+# Every 15 minutes: verify each recent agent commit whose message starts with submit(<target>):
+# and that has no comparator/<target> status yet. Nothing in the agent repository triggers this.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: check-submits
+jobs:
+  find:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.find.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Find submit( commits without a verdict
+        id: find
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_REPO_TOKEN }}
+        run: |
+          m=$(python3 scripts/pending_submits.py)
+          echo "$m" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "matrix=$m" >> "$GITHUB_OUTPUT"
+  verify:
+    needs: find
+    if: fromJSON(needs.find.outputs.matrix).include[0] != null
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.find.outputs.matrix) }}
+    uses: ./.github/workflows/verify.yml
+    with:
+      agent_commit: ${{ matrix.sha }}
+      target: ${{ matrix.target }}
+    secrets:
+      AGENT_REPO_TOKEN: ${{ secrets.AGENT_REPO_TOKEN }}
