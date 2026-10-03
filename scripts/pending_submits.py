@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """List recent agent commits that ask for a verdict and have none yet.
 
-It scans `main` and every `run/*` branch (one branch per measured run).
+It scans `main`, every `run/*` branch (one per measured run), and every `claude/*` branch
+(cloud sessions push their work to a branch of that name).
 
 A commit asks for a verdict when its message starts with `submit(<target>):` and
 `challenge/<target>.lean` exists here. It has a verdict once any `comparator/<target>`
@@ -26,7 +27,7 @@ def select(commits, statuses, targets):
     return out
 
 def watched(names):
-    return [n for n in names if n == "main" or n.startswith("run/")]
+    return [n for n in names if n == "main" or n.startswith(("run/", "claude/"))]
 
 def select_branches(by_branch, statuses, targets):
     out, seen = [], set()

@@ -26,4 +26,6 @@ def test_select_branches_dedupes_shared_commits():
     assert got == [{"sha": "m1", "target": "green72"}, {"sha": "a1", "target": "green72"}]
 
 def test_watched_branches():
-    assert ps.watched(["main", "run/b1", "run/a2", "freeze-test", "feature"]) == ["main", "run/b1", "run/a2"]
+    # Cloud sessions push to their own claude/<name> branch.
+    assert ps.watched(["main", "run/b1", "run/a2", "freeze-test", "feature", "claude/focused-faraday-2qp5e1"]) == \
+        ["main", "run/b1", "run/a2", "claude/focused-faraday-2qp5e1"]
