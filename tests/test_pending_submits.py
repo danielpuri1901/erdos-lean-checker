@@ -54,3 +54,10 @@ def test_latest_activity_reads_commit_dates():
                  "run/b1": [{"sha": "b", "commit": {"message": "y", "committer": {"date": "2026-10-03T19:30:00Z"}}}]}
     import datetime
     assert ps.latest_activity(by_branch) == datetime.datetime(2026, 10, 3, 19, 30, tzinfo=datetime.timezone.utc).timestamp()
+
+def test_api_accepts_empty_response(monkeypatch):
+    # A workflow dispatch answers 204 with no body; on 2026-10-03 that crashed the poller loop.
+    import io
+    monkeypatch.setenv("GH_TOKEN", "x")
+    monkeypatch.setattr(ps.urllib.request, "urlopen", lambda req, timeout: io.BytesIO(b""))
+    assert ps.api("actions/workflows/verify.yml/dispatches", body={"ref": "main"}) is None

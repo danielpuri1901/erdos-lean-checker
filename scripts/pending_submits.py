@@ -71,7 +71,8 @@ def api(path, repo=REPO, token_env="GH_TOKEN", body=None):
                                  data=json.dumps(body).encode() if body else None,
                                  headers={"Authorization": f"Bearer {os.environ[token_env]}",
                                           "Accept": "application/vnd.github+json"})
-    return json.load(urllib.request.urlopen(req, timeout=30))
+    raw = urllib.request.urlopen(req, timeout=30).read()
+    return json.loads(raw) if raw else None  # a dispatch answers 204 with no body
 
 def run_finished(run_id):
     return api(f"actions/runs/{run_id}", repo=CHECKER, token_env="CHECKER_TOKEN")["status"] == "completed"
@@ -100,12 +101,12 @@ def loop(every_s=120, max_s=5.5 * 3600, idle_s=2 * 3600):
     while True:
         try:
             pending, activity = scan()
+            for item in pending:
+                if item["sha"] not in dispatched:
+                    dispatch("verify.yml", {"agent_commit": item["sha"], "target": item["target"]})
+                    dispatched.add(item["sha"]); print(f"verify {item['sha'][:7]} {item['target']}", flush=True)
         except Exception as e:  # one failed API call must not end the poller
-            print(f"scan failed: {e}", flush=True); time.sleep(every_s); continue
-        for item in pending:
-            if item["sha"] not in dispatched:
-                dispatch("verify.yml", {"agent_commit": item["sha"], "target": item["target"]})
-                dispatched.add(item["sha"]); print(f"verify {item['sha'][:7]} {item['target']}", flush=True)
+            print(f"poll failed: {e}", flush=True); time.sleep(every_s); continue
         stop = should_stop(time.time(), started, activity, max_s, idle_s)
         if stop == "idle":
             print("no pushes for 2 hours; poller stops", flush=True); return
