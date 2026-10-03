@@ -71,12 +71,20 @@ After the fix the same commit is rejected (run https://github.com/danielpuri1901
 
 ## Automatic checks
 
-`check-submits.yml` runs every 15 minutes and on demand.
-It lists the last 30 commits of `main`, every `run/*` branch (one per measured run), and every `claude/*` branch (where cloud sessions push) of the agent repository and runs `verify.yml` for each commit whose message starts with `submit(<target>):`, where `challenge/<target>.lean` exists, and that has no `comparator/<target>` status yet.
+`check-submits.yml` is a polling loop: one job checks the agent repository every 2 minutes.
+GitHub's own schedule fired only twice in 7.5 hours on 2026-10-03, so the loop keeps itself alive: it stops after 2 hours without a push, and near the 6-hour job limit it starts a fresh run of itself.
+Start it by hand when a run begins (`gh workflow run check-submits.yml -R danielpuri1901/erdos-lean-checker`); the schedule only restarts it if it ever stopped.
+Each pass lists the last 30 commits of `main`, every `run/*` branch (one per measured run), and every `claude/*` branch (where cloud sessions push) of the agent repository and runs `verify.yml` for each commit whose message starts with `submit(<target>):`, where `challenge/<target>.lean` exists, and that has no `comparator/<target>` status yet.
 A pending status counts, so a running check is never started twice.
-If a check's runner dies (for example out of memory, as on 2026-10-03 for agent commit `de3bff9`), its final status step never runs; the next poller run turns that stale `pending` into a `failure` whose description says so, and the agent gets feedback.
+If a check's runner dies (for example out of memory, as on 2026-10-03 for agent commit `de3bff9`), its final status step never runs; the next pass turns that stale `pending` into a `failure` whose description says so, and the agent gets feedback.
 The selection logic is in `scripts/pending_submits.py`, tested by `tests/test_pending_submits.py`.
 Nothing in the agent repository can trigger it; the agent only pushes commits.
 
-Cost: on a private repository GitHub bills each job by the minute, rounded up, so the poller alone uses about 96 minutes a day.
+Runner limits: this private repository gets GitHub's small runner, 7.8 GB of memory and a 72 GB disk that is 99 percent full after the Mathlib cache.
+Two green72 submissions on 2026-10-03 built heavy kernel checks in parallel and the runner was killed.
+`verify.yml` now removes unused SDKs (about 18 GB) and adds a swap file of up to 16 GB, so a large check slows down instead of dying.
+Run https://github.com/danielpuri1901/erdos-lean-checker/actions/runs/37151232633 re-checked one of those submissions (`bc2e23b`, a copy of `de3bff9`) with 14 GB of swap: Comparator took 24 minutes and accepted it.
+
+Cost: on a private repository GitHub bills each job by the minute, rounded up.
+The poller bills every minute it runs, so a run day costs about the run's hours plus 2 idle hours, and each verdict about 30 to 50 minutes.
 Disable it between runs with `gh workflow disable check-submits.yml -R danielpuri1901/erdos-lean-checker`.
