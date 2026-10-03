@@ -1,43 +1,28 @@
 name: check-submits
-# Every 15 minutes: verify each recent agent commit whose message starts with submit(<target>):
-# and that has no comparator/<target> status yet. Nothing in the agent repository triggers this.
+# Polls the agent repository every 2 minutes and starts verify.yml for each submit(<target>): commit
+# that has no comparator/<target> status yet. Nothing in the agent repository can trigger this.
+# GitHub's own schedule is unreliable (it fired twice in 7.5 hours on 2026-10-03), so one run keeps
+# polling until nothing was pushed for 2 hours, and near the 6-hour job limit it starts a fresh run of itself.
+# Start it by hand when a run begins; the schedule below only restarts it if it ever stopped.
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '17 */2 * * *'
   workflow_dispatch:
 permissions:
   contents: read
-  actions: read
+  actions: write
 concurrency:
   group: check-submits
 jobs:
-  find:
+  poll:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      matrix: ${{ steps.find.outputs.matrix }}
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
-      - name: Find submit( commits without a verdict
-        id: find
+      - name: Poll for submit( commits without a verdict
         env:
           GH_TOKEN: ${{ secrets.AGENT_REPO_TOKEN }}
           CHECKER_TOKEN: ${{ github.token }}
-        run: |
-          m=$(python3 scripts/pending_submits.py)
-          echo "$m" | tee -a "$GITHUB_STEP_SUMMARY"
-          echo "matrix=$m" >> "$GITHUB_OUTPUT"
-  verify:
-    needs: find
-    if: fromJSON(needs.find.outputs.matrix).include[0] != null
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.find.outputs.matrix) }}
-    uses: ./.github/workflows/verify.yml
-    with:
-      agent_commit: ${{ matrix.sha }}
-      target: ${{ matrix.target }}
-    secrets:
-      AGENT_REPO_TOKEN: ${{ secrets.AGENT_REPO_TOKEN }}
+        run: python3 -u scripts/pending_submits.py --loop

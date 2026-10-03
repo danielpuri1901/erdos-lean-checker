@@ -39,3 +39,18 @@ def test_stale_pending_finds_pending_whose_run_finished():
     finished = {"11": True, "12": False, "13": True}
     assert ps.stale_pending(statuses, finished.get) == [
         ("s1", "comparator/green72", "https://github.com/o/r/actions/runs/11")]
+
+def test_should_stop_idle_restart_or_continue():
+    H = 3600
+    # Nothing pushed for over 2 hours: stop, no restart.
+    assert ps.should_stop(now=10 * H, started=9 * H, last_activity=7.5 * H, max_s=5.5 * H, idle_s=2 * H) == "idle"
+    # Recent pushes but the job is near its time limit: hand over to a fresh run.
+    assert ps.should_stop(now=5.6 * H, started=0, last_activity=5.5 * H, max_s=5.5 * H, idle_s=2 * H) == "restart"
+    # Recent pushes, plenty of time left: keep polling.
+    assert ps.should_stop(now=1 * H, started=0, last_activity=0.9 * H, max_s=5.5 * H, idle_s=2 * H) is None
+
+def test_latest_activity_reads_commit_dates():
+    by_branch = {"main": [{"sha": "a", "commit": {"message": "x", "committer": {"date": "2026-10-03T19:00:00Z"}}}],
+                 "run/b1": [{"sha": "b", "commit": {"message": "y", "committer": {"date": "2026-10-03T19:30:00Z"}}}]}
+    import datetime
+    assert ps.latest_activity(by_branch) == datetime.datetime(2026, 10, 3, 19, 30, tzinfo=datetime.timezone.utc).timestamp()
