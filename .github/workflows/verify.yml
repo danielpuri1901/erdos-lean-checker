@@ -71,6 +71,13 @@ jobs:
         # Only trusted code is built outside the sandbox. Comparator builds Solution under landrun.
         working-directory: agent
         run: lake build Challenge
+      - name: Statement checks (identical to formal-conjectures, small examples)
+        # A trusted file from this repository; it imports only the frozen challenge. A failure here stops the verdict.
+        working-directory: agent
+        run: |
+          set -o pipefail
+          f="../tests/statement/$TARGET.lean"
+          if [ -f "$f" ]; then lake env lean "$f" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"; fi
       - name: Clone Comparator (pinned) and match the agent's Lean version
         run: |
           git clone https://github.com/leanprover/comparator .tools/comparator
