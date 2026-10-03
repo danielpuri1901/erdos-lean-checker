@@ -72,7 +72,7 @@ After the fix the same commit is rejected (run https://github.com/danielpuri1901
 ## Automatic checks
 
 `check-submits.yml` runs every 15 minutes and on demand.
-It lists the last 30 commits of the agent repository and runs `verify.yml` for each commit whose message starts with `submit(<target>):`, where `challenge/<target>.lean` exists, and that has no `comparator/<target>` status yet.
+It lists the last 30 commits of `main` and of every `run/*` branch of the agent repository (one branch per measured run) and runs `verify.yml` for each commit whose message starts with `submit(<target>):`, where `challenge/<target>.lean` exists, and that has no `comparator/<target>` status yet.
 A pending status counts, so a running check is never started twice.
 The selection logic is in `scripts/pending_submits.py`, tested by `tests/test_pending_submits.py`.
 Nothing in the agent repository can trigger it; the agent only pushes commits.

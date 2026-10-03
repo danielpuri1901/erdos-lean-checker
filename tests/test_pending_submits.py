@@ -18,3 +18,12 @@ def test_select_skips_checked_unknown_and_non_submit():
     statuses = {"a1": ["comparator/erdos105"], "b2": [], "e5": ["comparator/erdos105"]}
     got = ps.select(commits, statuses, {"erdos105", "trivial"})
     assert got == [{"sha": "b2", "target": "erdos105"}, {"sha": "e5", "target": "trivial"}]
+
+def test_select_branches_dedupes_shared_commits():
+    by_branch = {"main": [c("m1", "submit(green72): b")],
+                 "run/a1": [c("a1", "submit(green72): a"), c("m1", "submit(green72): b")]}
+    got = ps.select_branches(by_branch, {}, {"green72"})
+    assert got == [{"sha": "m1", "target": "green72"}, {"sha": "a1", "target": "green72"}]
+
+def test_watched_branches():
+    assert ps.watched(["main", "run/b1", "run/a2", "freeze-test", "feature"]) == ["main", "run/b1", "run/a2"]

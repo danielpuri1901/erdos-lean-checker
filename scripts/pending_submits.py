@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """List recent agent commits that ask for a verdict and have none yet.
 
+It scans `main` and every `run/*` branch (one branch per measured run).
+
 A commit asks for a verdict when its message starts with `submit(<target>):` and
 `challenge/<target>.lean` exists here. It has a verdict once any `comparator/<target>`
 status exists on it (pending included, so a running check is not started twice).
@@ -23,6 +25,17 @@ def select(commits, statuses, targets):
             out.append({"sha": c["sha"], "target": t})
     return out
 
+def watched(names):
+    return [n for n in names if n == "main" or n.startswith("run/")]
+
+def select_branches(by_branch, statuses, targets):
+    out, seen = [], set()
+    for commits in by_branch.values():
+        for item in select(commits, statuses, targets):
+            if item["sha"] not in seen:
+                seen.add(item["sha"]); out.append(item)
+    return out
+
 def api(path):
     req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/{path}",
                                  headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}",
@@ -31,9 +44,12 @@ def api(path):
 
 def main():
     targets = {p.stem for p in (pathlib.Path(__file__).resolve().parent.parent / "challenge").glob("*.lean")}
-    commits = [c for c in api("commits?per_page=30") if parse_target(c["commit"]["message"]) in targets]
-    statuses = {c["sha"]: [s["context"] for s in api(f"commits/{c['sha']}/status")["statuses"]] for c in commits}
-    print(json.dumps({"include": select(commits, statuses, targets)}))
+    branches = watched([b["name"] for b in api("branches?per_page=100")])
+    by_branch = {b: [c for c in api(f"commits?sha={b}&per_page=30") if parse_target(c["commit"]["message"]) in targets]
+                 for b in branches}
+    shas = {c["sha"] for commits in by_branch.values() for c in commits}
+    statuses = {sha: [s["context"] for s in api(f"commits/{sha}/status")["statuses"]] for sha in shas}
+    print(json.dumps({"include": select_branches(by_branch, statuses, targets)}))
 
 if __name__ == "__main__":
     main()
