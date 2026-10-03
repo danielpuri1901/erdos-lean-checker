@@ -92,6 +92,14 @@ jobs:
       - name: Close the Docker socket
         # landrun does not filter AF_UNIX connections (Comparator README), and the runner user can reach Docker.
         run: sudo systemctl stop docker.socket docker.service
+      - name: Add swap so a large kernel check slows down instead of killing the runner
+        # Two submissions on 2026-10-03 (de3bff9, de563a7) built 4 heavy modules at once and the runner was shut down.
+        # continue-on-error: a swap failure must never turn into a wrong verdict.
+        continue-on-error: true
+        run: |
+          sudo fallocate -l 24G /mnt/checker.swap && sudo chmod 600 /mnt/checker.swap
+          sudo mkswap /mnt/checker.swap >/dev/null && sudo swapon /mnt/checker.swap
+          free -h | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Run Comparator
         id: comparator
         # The verdict is Comparator's exit code. The log also holds the solution's own build output,
