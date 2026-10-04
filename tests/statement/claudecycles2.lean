@@ -1,0 +1,19 @@
+import Challenge
+
+/-! Statement check for the claudecycles2 target, run by `verify.yml` after it builds the frozen challenge.
+The frozen statement must be exactly the formal-conjectures statement. -/
+
+open Lean Elab Command in
+run_cmd do
+  let env ← getEnv
+  let some ours := env.find? `cube_no_decomposition_m2 | throwError "the frozen statement is missing"
+  let some theirs := env.find? `ClaudesCycles.cube_hamiltonian_arc_decomposition_impossible_m2
+    | throwError "the formal-conjectures statement is missing"
+  unless theirs.levelParams.isEmpty && ours.levelParams.isEmpty do
+    throwError "check failed: unexpected universe variables"
+  let some other := env.find? `Nat.add_comm | throwError "Nat.add_comm is missing"
+  if ours.type == other.type then
+    throwError "self-test failed: the comparison cannot tell statements apart"
+  unless ours.type == theirs.type do
+    throwError "check failed: the frozen statement does not match the formal-conjectures statement"
+  logInfo "check passed: the frozen statement matches the formal-conjectures statement"
