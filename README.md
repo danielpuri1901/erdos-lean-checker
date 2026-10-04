@@ -3,7 +3,9 @@
 The trusted verifier for `erdos-lean-formalization`.
 
 This repository is never attached to a Claude Code session.
-The agent cannot read or edit it.
+The agent cannot edit it.
+It was private until 2026-10-04 and is public since then, so the agent can now read it.
+The verdict does not depend on secrecy: it is Comparator's exit code on the frozen statement.
 It holds the frozen target statements, the Comparator configuration, and a GitHub Actions workflow.
 
 The workflow checks out a named commit of the agent repository, builds the target, runs an axiom audit, and runs [Comparator](https://github.com/leanprover/comparator) under landrun against the frozen statement.
@@ -80,11 +82,15 @@ If a check's runner dies (for example out of memory, as on 2026-10-03 for agent 
 The selection logic is in `scripts/pending_submits.py`, tested by `tests/test_pending_submits.py`.
 Nothing in the agent repository can trigger it; the agent only pushes commits.
 
-Runner limits: this private repository gets GitHub's small runner, 7.8 GB of memory and a 72 GB disk that is 99 percent full after the Mathlib cache.
+Runner limits: as a private repository (until 2026-10-04) this repository got GitHub's small runner, 7.8 GB of memory and a 72 GB disk that is 99 percent full after the Mathlib cache.
 Two green72 submissions on 2026-10-03 built heavy kernel checks in parallel and the runner was killed.
 `verify.yml` now removes unused SDKs (about 18 GB) and adds a swap file of up to 16 GB, so a large check slows down instead of dying.
 Run https://github.com/danielpuri1901/erdos-lean-checker/actions/runs/37151232633 re-checked one of those submissions (`bc2e23b`, a copy of `de3bff9`) with 14 GB of swap: Comparator took 24 minutes and accepted it.
 
 Cost: on a private repository GitHub bills each job by the minute, rounded up.
 The poller bills every minute it runs, so a run day costs about the run's hours plus 2 idle hours, and each verdict about 30 to 50 minutes.
+On 2026-10-04 the account's minutes for private repositories ran out and GitHub stopped starting jobs.
+The repository was made public that evening, because GitHub does not bill standard runners on public repositories.
+Verdicts took about 7 minutes after the change, against 11 to 25 minutes before.
+`infra/referee-ec2.yaml` and `scripts/referee/` are a fallback that runs the same check on one EC2 machine; it was written that evening and has never been run.
 Disable it between runs with `gh workflow disable check-submits.yml -R danielpuri1901/erdos-lean-checker`.
