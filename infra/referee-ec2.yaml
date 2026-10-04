@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Referee machine for the Lean checker. Runs the Comparator check of verify.yml when GitHub Actions cannot start jobs.
+Parameters:
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+  InstanceType:
+    Type: String
+    Default: m7i.2xlarge
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+Resources:
+  # Holds the git bundles of the two private repositories. Nothing is public; objects expire after 7 days.
+  Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire
+            Status: Enabled
+            ExpirationInDays: 7
+  # The machine only needs Systems Manager; it reads the bundles through presigned URLs.
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+  Profile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref Role
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Referee machine - no inbound traffic
+      VpcId: !Ref VpcId
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref Profile
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      InstanceInitiatedShutdownBehavior: terminate
+      MetadataOptions:
+        HttpTokens: required
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 100
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      # Safety stop: the machine ends itself after 8 hours even if nobody deletes the stack.
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          shutdown -h +480
+      Tags:
+        - Key: Name
+          Value: lean-checker-referee
+        - Key: Project
+          Value: erdos-lean-checker
+Outputs:
+  InstanceId:
+    Value: !Ref Instance
+  BucketName:
+    Value: !Ref Bucket
